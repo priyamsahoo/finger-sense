@@ -1,35 +1,69 @@
-# Real-time Text Detection using OpenCV and Tesseract OCR
-
 import cv2
-import pytesseract
-from pytesseract import Output
+import imutils
+import numpy as np
+import pandas as pd
+from imutils.video import VideoStream
+import easyocr
 
-# Initialize the webcam
-video_capture = cv2.VideoCapture(0)
-video_capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-while True:
-    # Capture frame-by-frame from the webcam
-    ret, frame = video_capture.read()
+def main():
 
-    # Perform text detection using Tesseract OCR
-    extracted_data = pytesseract.image_to_data(frame, output_type=Output.DICT)
-    num_boxes = len(extracted_data['text'])
+    reader = easyocr.Reader(['en'], gpu=False)
 
-    for i in range(num_boxes):
-        if int(extracted_data['conf'][i]) > 60:
-            (text, x, y, w, h) = (extracted_data['text'][i], extracted_data['left'][i], extracted_data['top'][i],
-                                  extracted_data['width'][i], extracted_data['height'][i])
-            # Ensure the text is not empty or only whitespace
-            if text and text.strip() != "":
-                frame = cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                frame = cv2.putText(frame, text, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3)
+    # Defining the video stream on capture card index 0 by default
+    print("[STATUS] Starting video stream ...")
+    vs = VideoStream(src=0).start()
 
-    # Display the resulting frame with text bounding boxes
-    cv2.imshow('Text Detection', frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+    # Scale for down-scaling the image when processing
+    new_w, new_h = 320, 230
 
-# When everything is done, release the webcam and close the display window
-video_capture.release()
-cv2.destroyAllWindows()
+    print("[INFO] Press q in the video feed to exit ...")
+    while True:
+
+        # Getting the current frame, standardizing it and saving a copy
+        frame = vs.read()
+        frame = imutils.resize(frame, width=1000)
+        orig = frame.copy()
+
+        # Downsizing the image and defining a ratio to the original size
+        h, w = frame.shape[:2]
+        ratio_w = w / float(new_w)
+        ratio_h = h / float(new_h)
+        frame = cv2.resize(frame, (new_w, new_h))
+
+        # Parsing the frame through the text recognition and saving the results in a DataFrame
+        results = reader.readtext(np.array(frame))
+        df = pd.DataFrame(results, columns=['bbox', 'text', 'conf'])
+
+        # Looping over the results from the current frame and displaying it in a box overlay
+        for _, row in df.iterrows():
+            box_tuples = [(int(x * ratio_w), int(y * ratio_h))
+                          for x, y in row['bbox']]
+            cv2.rectangle(orig, box_tuples[0], box_tuples[2], (0, 255, 0), 2)
+            text = f"{row['text']} - {round(row['conf'], 2)}"
+            cv2.putText(orig, text, (box_tuples[3][0], box_tuples[3]
+                        [1] + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
+        # Show the original image with the added boxes
+        cv2.imshow("Live text recognition", orig)
+
+        # Check for 'q' keypress to stop the program
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q'):
+            break
+
+    # Stop the resources and closing all windows
+    vs.stop()
+    cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    # print("[STATUS] Listing all available video ports ...")
+
+    # # Function to print all available video indexes and return them as a list
+    # avail_ports = cameraUtils.list_ports()
+
+    # # Get the valid selected port index from the user
+    # port_index = cameraUtils.get_valid_input(avail_ports)
+
+    main()
